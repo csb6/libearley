@@ -1,15 +1,11 @@
-#include <ostream>
 #include <iostream>
 #include <cassert>
 #include <span>
 #include <string_view>
-#include <optional>
 #include <vector>
 #include <cstdint>
-#include <utility>
 #include <algorithm>
-#include <concepts>
-#include <numeric>
+#include <cctype>
 
 enum class Symbol : uint8_t {
     /* Terminals */
@@ -30,13 +26,16 @@ struct EarleyItem {
     EarleyItem(uint16_t rule_idx, uint32_t start_pos, uint16_t progress = 0)
         : rule_idx(rule_idx), progress(progress), start_pos(start_pos) {}
 
-    uint16_t rule_idx;  /* Which rule is matched */
+    uint16_t rule_idx;  /* Index of the rule that is being matched */
     uint16_t progress;  /* Dividing point between this item's matched/unmatched components */
     uint32_t start_pos; /* Where in input this match starts */
 };
 
 using StateSet = std::vector<EarleyItem>;
 using StateSetView = std::span<const EarleyItem>;
+
+using StateSetIterator = std::span<const StateSet>::iterator;
+
 using EarleyItemIterator = StateSet::const_iterator;
 
 static
@@ -67,17 +66,12 @@ bool matches_terminal(Symbol terminal, char input)
     }
 }
 
+/* Returns true if the item is complete. rule must be the item referred to
+by item.rule_idx */
 static constexpr
 bool is_completed(const Rule& rule, const EarleyItem& item)
 {
     return item.progress == rule.components.size();
-}
-
-static constexpr
-bool is_full_parse(std::span<const Rule> rules, Symbol start_symbol, const EarleyItem& item)
-{
-    const auto& rule = rules[item.rule_idx];
-    return is_completed(rule, item) && item.start_pos == 0 && rule.symbol == start_symbol;
 }
 
 static constexpr
@@ -142,22 +136,29 @@ std::vector<StateSet> parse(std::span<const Rule> rules, Symbol start_symbol, st
     return state_sets;
 }
 
-struct ParseState {
+struct ParseResult {
     constexpr
-    ParseState() = default;
+    ParseResult() = default;
     constexpr
-    ParseState(std::span<const StateSet>::iterator state_set, const Rule& rule)
-        : state_set(state_set), rule(&rule) {}
+    ParseResult(StateSetIterator state_set, EarleyItemIterator item)
+        : state_set(state_set), item(item) {}
 
-    std::span<const StateSet>::iterator state_set;
-    const Rule* rule = nullptr;
+    StateSetIterator state_set;
+    EarleyItemIterator item;
 
     constexpr
-    operator bool() const noexcept { return rule != nullptr; }
+    operator bool() const noexcept { return item != EarleyItemIterator{}; }
 };
 
 static constexpr
-ParseState find_final_parse(std::span<const Rule> rules, Symbol start_symbol,
+bool is_full_parse(std::span<const Rule> rules, Symbol start_symbol, const EarleyItem& item)
+{
+    const auto& rule = rules[item.rule_idx];
+    return is_completed(rule, item) && item.start_pos == 0 && rule.symbol == start_symbol;
+}
+
+static constexpr
+ParseResult find_full_parse(std::span<const Rule> rules, Symbol start_symbol,
                             std::span<const StateSet> state_sets, std::string_view input)
 {
     if(state_sets.size() < input.size()) {
@@ -171,89 +172,36 @@ ParseState find_final_parse(std::span<const Rule> rules, Symbol start_symbol,
     if(full_parse == state_set->end()) {
         return {};
     }
-
-    return {state_set, rules[full_parse->rule_idx]};
+    return {state_set, full_parse};
 }
 
+/* Given that we are iterating in reverse over the direct subcomponents of an Earley item and
+the current subcomponent is a terminal symbol, advance the state set iterator to the state
+set relevant for the next subcomponent of our traversal. */
 static constexpr
-EarleyItemIterator next_from_terminal(ParseState& state)
+void advance_from_terminal(StateSetIterator& state_set)
 {
-    --state.state_set;
-    return state.state_set->end();
+    --state_set;
 }
 
+/* Find a completed Earley item with the given symbol as its head in the provided range of Earley items */
 static constexpr
-EarleyItemIterator next_from_nonterminal(std::span<const Rule> rules, ParseState& state,
-                                         std::span<const StateSet> state_sets,
-                                         EarleyItemIterator curr, EarleyItemIterator limit,
-                                         std::vector<Symbol>::const_reverse_iterator comp_sym)
+EarleyItemIterator find_completed_item(std::span<const Rule> rules,
+                                       EarleyItemIterator first, EarleyItemIterator limit, Symbol comp_sym)
 {
-    auto comp_item = std::ranges::find_if(curr, limit, [&rules, comp_sym](const auto& item) {
+    return std::ranges::find_if(first, limit, [rules, comp_sym](const auto& item) {
         const auto& item_rule = rules[item.rule_idx];
-        return item_rule.symbol == *comp_sym && is_completed(item_rule, item);
+        return item_rule.symbol == comp_sym && is_completed(item_rule, item);
     });
-    assert(comp_item != state.state_set->end());
-    state.state_set = state_sets.begin() + comp_item->start_pos;
-    return comp_item;
 }
 
+/* Given that we are iterating in reverse over the direct subcomponents of an Earley item and
+the current subcomponent is a nonterminal, advance the state set iterator to the state set
+relevant for the next subcomponent in the traversal. */
 static constexpr
-EarleyItemIterator next_parse(std::span<const Rule> rules, std::span<const StateSet> state_sets, ParseState& state,
-                              std::vector<Symbol>::const_reverse_iterator comp_sym)
+void advance_from_nonterminal(std::span<const StateSet> state_sets, StateSetIterator& state_set, EarleyItemIterator item)
 {
-    if(is_terminal(*comp_sym)) {
-        --state.state_set;
-        return state.state_set->end();
-    } else {
-        // Nonterminal
-        // TODO: split up this function so we can continue search in state.state_set if we want to,
-        //  allowing us to try different alternatives
-        auto comp_item = std::ranges::find_if(*state.state_set, [&rules, comp_sym](const auto& item) {
-            const auto& item_rule = rules[item.rule_idx];
-            return item_rule.symbol == *comp_sym && is_completed(item_rule, item);
-        });
-        assert(comp_item != state.state_set->end());
-        state.state_set = state_sets.begin() + comp_item->start_pos;
-        return comp_item;
-    }
-}
-
-static constexpr
-bool build_parse_tree(std::span<const Rule> rules, Symbol start_symbol,
-                      std::span<const StateSet> state_sets, std::string_view input)
-{
-    if(state_sets.size() < input.size()) {
-        return false;
-    }
-
-    auto state_set = state_sets.begin() + input.size();
-    auto full_parse = std::ranges::find_if(*state_set, [&rules, start_symbol](const auto& item) {
-        return is_full_parse(rules, start_symbol, item);
-    });
-    if(full_parse == state_set->end()) {
-        return false;
-    }
-
-    std::cerr << "Full parse: "; print_item(std::cerr, rules, *full_parse) << "\n\n";
-    const auto& full_parse_rule = rules[full_parse->rule_idx];
-
-    for(auto comp_sym = full_parse_rule.components.rbegin(); comp_sym < full_parse_rule.components.rend(); ++comp_sym) {
-        if(is_terminal(*comp_sym)) {
-            std::cerr << "Partial parse: " << *comp_sym << "\n";
-            --state_set;
-        } else {
-            // Nonterminal
-            auto comp_item = std::ranges::find_if(*state_set, [&rules, comp_sym](const auto& item) {
-                const auto& item_rule = rules[item.rule_idx];
-                return item_rule.symbol == *comp_sym && is_completed(item_rule, item);
-            });
-            assert(comp_item != state_set->end());
-            std::cerr << "Partial parse: "; print_item(std::cerr, rules, *comp_item) << "\n";
-            state_set = state_sets.begin() + comp_item->start_pos;
-        }
-    }
-
-    return true;
+    state_set = state_sets.begin() + item->start_pos;
 }
 
 
@@ -297,23 +245,37 @@ int main(int argc, char** argv)
         print_state_set(std::cerr, rules, state_set) << "\n";
     }
 
-    // if(!build_parse_tree(rules, start_symbol, state_sets, input)) {
-    //     std::cerr << "Error: parse failed\n";
-    // }
-    auto parse_state = find_final_parse(rules, start_symbol, state_sets, input);
-    if(!parse_state) {
+    auto full_parse = find_full_parse(rules, start_symbol, state_sets, input);
+    if(!full_parse) {
         std::cerr << "Error: parse failed\n";
         return 1;
     }
+    std::cerr << "Full parse: "; print_item(std::cerr, rules, *full_parse.item) << "\n";
 
-    for(auto comp_sym = parse_state.rule->components.rbegin(); comp_sym < parse_state.rule->components.rend(); ++comp_sym) {
-        EarleyItemIterator item = parse_state.state_set->begin();
+    const auto& full_parse_rule = rules[full_parse.item->rule_idx];
+    auto curr_state_set = full_parse.state_set;
+    for(auto comp_sym = full_parse_rule.components.rbegin(); comp_sym < full_parse_rule.components.rend(); ++comp_sym) {
         if(is_terminal(*comp_sym)) {
-            item = next_from_terminal(parse_state);
-            std::cerr << "Partial parse: " << *comp_sym << "\n";
+            /*
+            Note: While there are one or more partially complete items in curr_state_set that corresponds to our current
+            subcomponent (those items' dots will be just before comp_sym), there is no point in searching
+            for them since we already know the parent item, our position in it, the terminal symbol at that position,
+            and how to get to the next relevant state set.
+            */
+            std::cerr << "Subcomponent parse: " << *comp_sym << "\n";
+            advance_from_terminal(curr_state_set);
         } else {
-            item = next_from_nonterminal(rules, parse_state, state_sets, item, parse_state.state_set->end(), comp_sym);
-            std::cerr << "Partial parse: "; print_item(std::cerr, rules, *item) << "\n";
+            auto curr_item = find_completed_item(rules, curr_state_set->begin(), curr_state_set->end(), *comp_sym);
+            assert(curr_item != curr_state_set->end());
+            std::cerr << "Subcomponent parse: "; print_item(std::cerr, rules, *curr_item) << "\n";
+            {
+                auto alt_item = find_completed_item(rules, curr_item + 1, curr_state_set->end(), *comp_sym);
+                while(alt_item != curr_state_set->end()) {
+                    std::cerr << "  Alternative subcomponent parse: "; print_item(std::cerr, rules, *alt_item) << "\n";
+                    alt_item = find_completed_item(rules, alt_item + 1, curr_state_set->end(), *comp_sym);
+                }
+            }
+            advance_from_nonterminal(state_sets, curr_state_set, curr_item);
         }
     }
     return 0;
