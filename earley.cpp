@@ -213,6 +213,50 @@ void print_elapsed_time(auto start_time, const char* label)
     std::cerr << label << ": " << duration.count() << "ms\n";
 }
 
+static
+std::ostream& indent(std::ostream& out, uint16_t indent_level)
+{
+    for(uint16_t i = 0; i < indent_level; ++i) {
+        out << "  ";
+    }
+    return out;
+}
+
+static
+void print_parse_tree(std::ostream& out, std::span<const Rule> rules, std::span<const StateSet> state_sets,
+                      const Rule& rule, StateSetIterator curr_state_set, uint16_t indent_level = 0)
+{
+    for(auto comp_sym = rule.components.rbegin(); comp_sym < rule.components.rend(); ++comp_sym) {
+        if(is_terminal(*comp_sym)) {
+            /*
+            Note: While there are one or more partially complete items in curr_state_set that corresponds to our current
+            subcomponent (those items' dots will be just before comp_sym), there is no point in searching
+            for them since we already know the parent item, our position in it, the terminal symbol at that position,
+            and how to get to the next relevant state set.
+            */
+            indent(out, indent_level) << *comp_sym << "\n";
+            advance_from_terminal(curr_state_set);
+        } else {
+            // TODO: how to disambiguate between 'Number -> [0-9] .' and 'Number -> [0-9] Number .'
+            //   - Both may be present in the same state set
+            //   - Both may be complete
+            //   - Both have same nonterminal as head
+            auto curr_item = find_completed_item(rules, curr_state_set->begin(), curr_state_set->end(), *comp_sym);
+            assert(curr_item != curr_state_set->end());
+            indent(out, indent_level); print_item(out, rules, *curr_item) << "\n";
+            {
+                auto alt_item = find_completed_item(rules, curr_item + 1, curr_state_set->end(), *comp_sym);
+                while(alt_item != curr_state_set->end()) {
+                    indent(out, indent_level) << "Alternative: "; print_item(out, rules, *alt_item) << "\n";
+                    alt_item = find_completed_item(rules, alt_item + 1, curr_state_set->end(), *comp_sym);
+                }
+            }
+            print_parse_tree(out, rules, state_sets, rules[curr_item->rule_idx], curr_state_set, indent_level + 1);
+            advance_from_nonterminal(state_sets, curr_state_set, curr_item);
+        }
+    }
+}
+
 
 int main(int argc, char** argv)
 {
@@ -261,34 +305,11 @@ int main(int argc, char** argv)
         std::cerr << "Error: parse failed\n";
         return 1;
     }
+    const auto& full_parse_rule = rules[full_parse.item->rule_idx];
     std::cerr << "Full parse: "; print_item(std::cerr, rules, *full_parse.item) << "\n";
 
-    const auto& full_parse_rule = rules[full_parse.item->rule_idx];
-    auto curr_state_set = full_parse.state_set;
-    for(auto comp_sym = full_parse_rule.components.rbegin(); comp_sym < full_parse_rule.components.rend(); ++comp_sym) {
-        if(is_terminal(*comp_sym)) {
-            /*
-            Note: While there are one or more partially complete items in curr_state_set that corresponds to our current
-            subcomponent (those items' dots will be just before comp_sym), there is no point in searching
-            for them since we already know the parent item, our position in it, the terminal symbol at that position,
-            and how to get to the next relevant state set.
-            */
-            std::cerr << "Subcomponent parse: " << *comp_sym << "\n";
-            advance_from_terminal(curr_state_set);
-        } else {
-            auto curr_item = find_completed_item(rules, curr_state_set->begin(), curr_state_set->end(), *comp_sym);
-            assert(curr_item != curr_state_set->end());
-            std::cerr << "Subcomponent parse: "; print_item(std::cerr, rules, *curr_item) << "\n";
-            {
-                auto alt_item = find_completed_item(rules, curr_item + 1, curr_state_set->end(), *comp_sym);
-                while(alt_item != curr_state_set->end()) {
-                    std::cerr << "  Alternative subcomponent parse: "; print_item(std::cerr, rules, *alt_item) << "\n";
-                    alt_item = find_completed_item(rules, alt_item + 1, curr_state_set->end(), *comp_sym);
-                }
-            }
-            advance_from_nonterminal(state_sets, curr_state_set, curr_item);
-        }
-    }
+    std::cerr << "\nParse tree:\n";
+    print_parse_tree(std::cerr, rules, state_sets, full_parse_rule, full_parse.state_set);
     return 0;
 }
 
