@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <algorithm>
 #include <cctype>
+#include <ratio>
+#include <chrono>
 
 enum class Symbol : uint8_t {
     /* Terminals */
@@ -204,6 +206,13 @@ void advance_from_nonterminal(std::span<const StateSet> state_sets, StateSetIter
     state_set = state_sets.begin() + item->start_pos;
 }
 
+static
+void print_elapsed_time(auto start_time, const char* label)
+{
+    std::chrono::duration<double, std::milli> duration = std::chrono::steady_clock::now() - start_time;
+    std::cerr << label << ": " << duration.count() << "ms\n";
+}
+
 
 int main(int argc, char** argv)
 {
@@ -236,7 +245,9 @@ int main(int argc, char** argv)
     constexpr auto start_symbol = Sum;
 
     std::string_view input = argv[1];
+    auto start_time = std::chrono::steady_clock::now();
     auto state_sets = parse(rules, start_symbol, input);
+    print_elapsed_time(start_time, "Recognizer time");
 
     std::cerr << "\nState sets after parsing terminates:\n";
     uint32_t state_set_num = 0;
