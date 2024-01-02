@@ -82,6 +82,9 @@ Symbol next_symbol(const Rule& rule, const EarleyItem& item)
     return rule.components[item.progress];
 }
 
+// TODO: state_set is 32 bytes in size. Is it possible to make it smaller/cheaper to copy?
+//  Consider possible "fat" range object with small iterators that point back to it
+//  (see https://ericniebler.com/2013/11/07/input-iterators-vs-input-ranges/)
 static constexpr
 bool rule_exists(StateSetView state_set, uint16_t rule_idx, uint32_t curr_pos)
 {
@@ -177,15 +180,6 @@ ParseResult find_full_parse(std::span<const Rule> rules, Symbol start_symbol,
     return {state_set, full_parse};
 }
 
-/* Given that we are iterating in reverse over the direct subcomponents of an Earley item and
-the current subcomponent is a terminal symbol, advance the state set iterator to the state
-set relevant for the next subcomponent of our traversal. */
-static constexpr
-void advance_from_terminal(StateSetIterator& state_set)
-{
-    --state_set;
-}
-
 /* Find a completed Earley item with the given symbol as its head in the provided range of Earley items */
 static constexpr
 EarleyItemIterator find_completed_item(std::span<const Rule> rules,
@@ -193,8 +187,29 @@ EarleyItemIterator find_completed_item(std::span<const Rule> rules,
 {
     return std::ranges::find_if(first, limit, [rules, comp_sym](const auto& item) {
         const auto& item_rule = rules[item.rule_idx];
+        // TODO: add another condition to ensure the item we match starts at the input position
+        //  we expect. Otherwise we can accidently find 'Number -> [0-9] . (1)' instead of the correct
+        //  parse, 'Number -> [0-9] Number . (0)' in the parse for '11'
+        //    - This won't be possible to do since we don't know how long a 'Number' should be without
+        //      trying one path and backtracking if it doesn't work. Might make sense to see if we can
+        //      construct the tree forwards instead like in the article
+        //         - If parent item is 'Factor -> Number . (0)', then we DO know where 'Number' has to
+        //           start: position 0 in the input. But will this solve the issue in general for
+        //           unambiguous parses?
+        //    - Could also rely on setting rule priorities, but I don't like this since the grammar in
+        //      this case is not ambiguous and works if you use left-recursion instead of right-recursion.
+        //      Grammars that have a complete parse should 'just work'
         return item_rule.symbol == comp_sym && is_completed(item_rule, item);
     });
+}
+
+/* Given that we are iterating in reverse over the direct subcomponents of an Earley item and
+the current subcomponent is a terminal symbol, advance the state set iterator to the state
+set relevant for the next subcomponent of our traversal. */
+static constexpr
+void advance_from_terminal(StateSetIterator& state_set)
+{
+    --state_set;
 }
 
 /* Given that we are iterating in reverse over the direct subcomponents of an Earley item and
@@ -222,6 +237,8 @@ std::ostream& indent(std::ostream& out, uint16_t indent_level)
     return out;
 }
 
+// TODO: how to do left vs. right associativity (currently we are essentially forcing right associativity
+//  since we can only traverse the parse tree depth-first starting at the right)
 static
 void print_parse_tree(std::ostream& out, std::span<const Rule> rules, std::span<const StateSet> state_sets,
                       const Rule& rule, StateSetIterator curr_state_set, uint16_t indent_level = 0)
@@ -229,7 +246,7 @@ void print_parse_tree(std::ostream& out, std::span<const Rule> rules, std::span<
     for(auto comp_sym = rule.components.rbegin(); comp_sym < rule.components.rend(); ++comp_sym) {
         if(is_terminal(*comp_sym)) {
             /*
-            Note: While there are one or more partially complete items in curr_state_set that corresponds to our current
+            Note: While there are one or more partially complete items in curr_state_set that correspond to our current
             subcomponent (those items' dots will be just before comp_sym), there is no point in searching
             for them since we already know the parent item, our position in it, the terminal symbol at that position,
             and how to get to the next relevant state set.
@@ -237,10 +254,6 @@ void print_parse_tree(std::ostream& out, std::span<const Rule> rules, std::span<
             indent(out, indent_level) << *comp_sym << "\n";
             advance_from_terminal(curr_state_set);
         } else {
-            // TODO: how to disambiguate between 'Number -> [0-9] .' and 'Number -> [0-9] Number .'
-            //   - Both may be present in the same state set
-            //   - Both may be complete
-            //   - Both have same nonterminal as head
             auto curr_item = find_completed_item(rules, curr_state_set->begin(), curr_state_set->end(), *comp_sym);
             assert(curr_item != curr_state_set->end());
             indent(out, indent_level); print_item(out, rules, *curr_item) << "\n";
