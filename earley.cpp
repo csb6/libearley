@@ -8,6 +8,7 @@
 #include <cctype>
 #include <ratio>
 #include <chrono>
+#include "span_list.hpp"
 
 enum class Symbol : uint8_t {
     /* Terminals */
@@ -33,12 +34,13 @@ struct EarleyItem {
     uint32_t start_pos; /* Where in input this match starts */
 };
 
-using StateSet = std::vector<EarleyItem>;
-using StateSetView = std::span<const EarleyItem>;
+using StateSetIterator = SpanList<EarleyItem>::const_iterator;
 
-using StateSetIterator = std::span<const StateSet>::iterator;
+using StateSet = std::span<const EarleyItem>;
 
-using EarleyItemIterator = StateSet::const_iterator;
+using EarleyItemRange = SpanList<EarleyItem>::item_range;
+
+using EarleyItemIterator = StateSet::iterator;
 
 static
 std::ostream& operator<<(std::ostream&, Symbol);
@@ -47,7 +49,7 @@ static
 std::ostream& print_item(std::ostream&, std::span<const Rule>, const EarleyItem&);
 
 static
-std::ostream& print_state_set(std::ostream&, std::span<const Rule>, StateSetView);
+std::ostream& print_state_set(std::ostream&, std::span<const Rule>, StateSet);
 
 static constexpr
 bool is_terminal(Symbol s) { return (uint8_t)s <= (uint8_t)Symbol::Last_Terminal; }
@@ -86,7 +88,7 @@ Symbol next_symbol(const Rule& rule, const EarleyItem& item)
 //  Consider possible "fat" range object with small iterators that point back to it
 //  (see https://ericniebler.com/2013/11/07/input-iterators-vs-input-ranges/)
 static constexpr
-bool rule_exists(StateSetView state_set, uint16_t rule_idx, uint32_t curr_pos)
+bool rule_exists(const EarleyItemRange& state_set, uint16_t rule_idx, uint32_t curr_pos)
 {
     return std::ranges::any_of(state_set, [rule_idx, curr_pos](const auto& item) {
         return item.rule_idx == rule_idx && item.start_pos == curr_pos;
@@ -94,30 +96,29 @@ bool rule_exists(StateSetView state_set, uint16_t rule_idx, uint32_t curr_pos)
 }
 
 static constexpr
-std::vector<StateSet> parse(std::span<const Rule> rules, Symbol start_symbol, std::string_view input)
+SpanList<EarleyItem> parse(std::span<const Rule> rules, Symbol start_symbol, std::string_view input)
 {
-    std::vector<StateSet> state_sets;
+    SpanList<EarleyItem> state_sets;
     // Initialize S(0)
-    state_sets.emplace_back();
+    state_sets.add_span();
     for(uint16_t i = 0; i < rules.size(); ++i) {
         if(rules[i].symbol == start_symbol) {
-            state_sets[0].emplace_back(i, 0);
+            state_sets.emplace_back(i, 0);
         }
     }
 
     // Process input
+    std::vector<EarleyItem> next_state_set;
     for(uint32_t curr_pos = 0; curr_pos <= input.size() && !state_sets[curr_pos].empty(); ++curr_pos) {
-        state_sets.emplace_back();
-        auto& state_set = state_sets[curr_pos];
-        for(uint32_t i = 0; i < state_set.size(); ++i) {
-            const auto& item = state_set[i];
+        auto state_set = state_sets.span_at(curr_pos);
+        for(const auto& item : state_set) {
             const auto& item_rule = rules[item.rule_idx];
             if(is_completed(item_rule, item)) {
                 // Completion
-                for(const auto& start_item : state_sets[item.start_pos]) {
+                for(const auto& start_item : state_sets.span_at(item.start_pos)) {
                     const auto& start_rule = rules[start_item.rule_idx];
                     if(!is_completed(start_rule, start_item) && next_symbol(start_rule, start_item) == item_rule.symbol) {
-                        state_set.emplace_back(start_item.rule_idx, start_item.start_pos, start_item.progress + 1);
+                        state_sets.emplace_back(start_item.rule_idx, start_item.start_pos, start_item.progress + 1);
                     }
                 }
             } else {
@@ -125,18 +126,21 @@ std::vector<StateSet> parse(std::span<const Rule> rules, Symbol start_symbol, st
                 if(is_terminal(next_sym) && curr_pos < input.size()) { // TODO: how can we get rid of this check (only necessary for final state)
                     // Scan
                     if(matches_terminal(next_sym, input[curr_pos])) {
-                        state_sets[curr_pos + 1].emplace_back(item.rule_idx, item.start_pos, item.progress + 1);
+                        next_state_set.emplace_back(item.rule_idx, item.start_pos, item.progress + 1);
                     }
                 } else {
                     // Prediction
                     for(uint16_t rule_idx = 0; rule_idx < rules.size(); ++rule_idx) {
                         if(rules[rule_idx].symbol == next_sym && !rule_exists(state_set, rule_idx, curr_pos)) {
-                            state_set.emplace_back(rule_idx, curr_pos);
+                            state_sets.emplace_back(rule_idx, curr_pos);
                         }
                     }
                 }
             }
         }
+        state_sets.add_span();
+        state_sets.insert(next_state_set.begin(), next_state_set.end());
+        next_state_set.clear();
     }
     return state_sets;
 }
@@ -164,7 +168,7 @@ bool is_full_parse(std::span<const Rule> rules, Symbol start_symbol, const Earle
 
 static constexpr
 ParseResult find_full_parse(std::span<const Rule> rules, Symbol start_symbol,
-                            std::span<const StateSet> state_sets, std::string_view input)
+                            const SpanList<EarleyItem>& state_sets, std::string_view input)
 {
     if(state_sets.size() < input.size()) {
         return {};
@@ -216,7 +220,7 @@ void advance_from_terminal(StateSetIterator& state_set)
 the current subcomponent is a nonterminal, advance the state set iterator to the state set
 relevant for the next subcomponent in the traversal. */
 static constexpr
-void advance_from_nonterminal(std::span<const StateSet> state_sets, StateSetIterator& state_set, EarleyItemIterator item)
+void advance_from_nonterminal(const SpanList<EarleyItem>& state_sets, StateSetIterator& state_set, EarleyItemIterator item)
 {
     state_set = state_sets.begin() + item->start_pos;
 }
@@ -240,7 +244,7 @@ std::ostream& indent(std::ostream& out, uint16_t indent_level)
 // TODO: how to do left vs. right associativity (currently we are essentially forcing right associativity
 //  since we can only traverse the parse tree depth-first starting at the right)
 static
-void print_parse_tree(std::ostream& out, std::span<const Rule> rules, std::span<const StateSet> state_sets,
+void print_parse_tree(std::ostream& out, std::span<const Rule> rules, const SpanList<EarleyItem>& state_sets,
                       const Rule& rule, StateSetIterator curr_state_set, uint16_t indent_level = 0)
 {
     for(auto comp_sym = rule.components.rbegin(); comp_sym < rule.components.rend(); ++comp_sym) {
@@ -280,23 +284,23 @@ int main(int argc, char** argv)
 
     using enum Symbol;
     const Rule rules[] = {
-        // Sum     -> Sum     [+ -] Product
+    // Sum     -> Sum     [+ -] Product
         { Sum,     { Sum, Plus, Product } },
         { Sum,     { Sum, Minus, Product } },
-        // Sum     -> Product
+    // Sum     -> Product
         { Sum,     { Product } },
-        // Product -> Product [* /] Factor
+    // Product -> Product [* /] Factor
         { Product, { Product, Mult, Factor } },
         { Product, { Product, Div, Factor } },
-        // Product -> Factor
+    // Product -> Factor
         { Product, { Factor } },
-        // Factor  -> '(' Sum ')'
+    // Factor  -> '(' Sum ')'
         { Factor,  { LParen, Sum, RParen } },
-        // Factor  -> Number
+    // Factor  -> Number
         { Factor,  { Number } },
-        // Number  -> [0-9]
+    // Number  -> [0-9]
         { Number,  { Digit } },
-        // Number  -> [0-9] Number
+    // Number  -> [0-9] Number
         { Number,  { Digit, Number } }
     };
     constexpr auto start_symbol = Sum;
@@ -387,7 +391,7 @@ std::ostream& print_item(std::ostream& out, std::span<const Rule> rules, const E
 }
 
 static
-std::ostream& print_state_set(std::ostream& out, std::span<const Rule> rules, StateSetView state_set)
+std::ostream& print_state_set(std::ostream& out, std::span<const Rule> rules, StateSet state_set)
 {
     out << "{\n";
     for(const auto& item : state_set) {
