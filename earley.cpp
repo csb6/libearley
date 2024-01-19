@@ -36,9 +36,7 @@ struct EarleyItem {
 
 using StateSetIterator = SpanList<EarleyItem>::const_iterator;
 
-using StateSet = std::span<const EarleyItem>;
-
-using EarleyItemIterator = StateSet::iterator;
+using EarleyItemIterator = std::span<const EarleyItem>::iterator;
 
 static
 std::ostream& operator<<(std::ostream&, Symbol);
@@ -47,7 +45,7 @@ static
 std::ostream& print_item(std::ostream&, std::span<const Rule>, const EarleyItem&);
 
 static
-std::ostream& print_state_set(std::ostream&, std::span<const Rule>, StateSet);
+std::ostream& print_state_set(std::ostream&, std::span<const Rule>, std::span<const EarleyItem>);
 
 static constexpr
 bool is_terminal(Symbol s) { return (uint8_t)s <= (uint8_t)Symbol::Last_Terminal; }
@@ -389,7 +387,7 @@ std::ostream& print_item(std::ostream& out, std::span<const Rule> rules, const E
 }
 
 static
-std::ostream& print_state_set(std::ostream& out, std::span<const Rule> rules, StateSet state_set)
+std::ostream& print_state_set(std::ostream& out, std::span<const Rule> rules, std::span<const EarleyItem> state_set)
 {
     out << "{\n";
     for(const auto& item : state_set) {
