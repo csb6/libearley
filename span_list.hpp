@@ -42,58 +42,21 @@ private:
     std::vector<uint32_t>::const_iterator start_point;
 };
 
-/* Iterator for moving between items within a single span of a SpanList<T> structure.
-   Note: this iterator remains valid even when items are added to the SpanList. */
-template<typename T>
-struct SpanItemIterator : public boost::stl_interfaces::iterator_interface<SpanItemIterator<T>,
-                                    std::forward_iterator_tag,
-                                    T> {
-    using Base = boost::stl_interfaces::iterator_interface<SpanItemIterator,
-                    std::forward_iterator_tag,
-                    T>;
-    using Base::operator++;
-
-    constexpr
-    SpanItemIterator() = default;
-    constexpr
-    SpanItemIterator(std::vector<T>& items, uint32_t idx)
-        : items(&items), idx(idx) {}
-
-    constexpr
-    bool operator==(const SpanItemIterator& other) const noexcept { return other.idx == idx; }
-    constexpr
-    T& operator*() noexcept { return (*items)[idx]; }
-    constexpr
-    T& operator*() const noexcept { return (*items)[idx]; }
-    constexpr
-    SpanItemIterator& operator++() noexcept
-    {
-        ++idx;
-        return *this;
-    }
-private:
-    friend struct SpanEnd;
-    std::vector<T>* items = nullptr;
-    uint32_t idx = 0;
-};
-
-/* Sentinel for SpanItemIterator representing end of the span */
+/* Sentinel representing end of a span of items */
 struct SpanEnd {
     constexpr
     SpanEnd() = default;
     constexpr
-    SpanEnd(std::vector<uint32_t>& start_points, uint32_t end_idx)
-        : start_points(&start_points), end_idx(end_idx) {}
+    SpanEnd(const uint32_t* end_idx)
+        : end_idx(end_idx) {}
 
-    template<typename T>
     constexpr
-    bool operator==(const SpanItemIterator<T>& iter) const noexcept
+    bool operator==(uint32_t idx) const noexcept
     {
-        return iter.idx >= (*start_points)[end_idx];
+        return idx >= *end_idx;
     }
 private:
-    std::vector<uint32_t>* start_points;
-    uint32_t end_idx = 0;
+    const uint32_t* end_idx = nullptr;
 };
 
 /* Represents a growable array (divided into subspans) of items of type T. Items can only be added to
@@ -102,8 +65,6 @@ template<typename T>
 class SpanList {
 public:
     using const_iterator = SpanListIterator<T>;
-    using item_iterator = SpanItemIterator<T>;
-    using item_range = std::ranges::subrange<item_iterator, SpanEnd>;
 
     constexpr
     void add_span()
@@ -139,11 +100,13 @@ public:
     {
         return {items.begin() + start_points[index], items.begin() + start_points[index+1]};
     }
-    /* Same as operator[], but iterators remain valid when items are added to the SpanList */
+    /* Same as operator[], but iterators remain valid when items are added to the SpanList
+       Note: adding new spans invalidates the ranges returned by this function. */
     constexpr
-    item_range span_at(uint32_t index) noexcept
+    auto span_at(uint32_t index) const noexcept
     {
-        return {item_iterator{items, start_points[index]}, SpanEnd{start_points, index+1}};
+        return std::views::iota(start_points[index], SpanEnd{&start_points[index+1]})
+             | std::views::transform([this](uint32_t idx){ return items[idx]; });
     }
 
     constexpr

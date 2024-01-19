@@ -25,7 +25,7 @@ struct Rule {
 };
 
 struct EarleyItem {
-    explicit
+    explicit constexpr
     EarleyItem(uint16_t rule_idx, uint32_t start_pos, uint16_t progress = 0)
         : rule_idx(rule_idx), progress(progress), start_pos(start_pos) {}
 
@@ -37,8 +37,6 @@ struct EarleyItem {
 using StateSetIterator = SpanList<EarleyItem>::const_iterator;
 
 using StateSet = std::span<const EarleyItem>;
-
-using EarleyItemRange = SpanList<EarleyItem>::item_range;
 
 using EarleyItemIterator = StateSet::iterator;
 
@@ -88,7 +86,7 @@ Symbol next_symbol(const Rule& rule, const EarleyItem& item)
 //  Consider possible "fat" range object with small iterators that point back to it
 //  (see https://ericniebler.com/2013/11/07/input-iterators-vs-input-ranges/)
 static constexpr
-bool rule_exists(const EarleyItemRange& state_set, uint16_t rule_idx, uint32_t curr_pos)
+bool rule_exists(const std::ranges::forward_range auto& state_set, uint16_t rule_idx, uint32_t curr_pos)
 {
     return std::ranges::any_of(state_set, [rule_idx, curr_pos](const auto& item) {
         return item.rule_idx == rule_idx && item.start_pos == curr_pos;
