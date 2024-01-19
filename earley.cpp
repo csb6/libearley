@@ -8,6 +8,7 @@
 #include <cctype>
 #include <ratio>
 #include <chrono>
+#include <ranges>
 #include "span_list.hpp"
 
 enum class Symbol : uint8_t {
@@ -16,12 +17,38 @@ enum class Symbol : uint8_t {
     /* Nonterminals */
     Number, Sum, Product, Factor,
 
+    Symbol_Count,
+    First_Symbol = Plus,
     Last_Terminal = Digit
 };
 
 struct Rule {
     Symbol symbol;
     std::vector<Symbol> components;
+};
+
+struct RuleSet {
+    using index_range = std::ranges::iota_view<uint16_t, uint16_t>;
+
+    explicit constexpr
+    RuleSet(std::span<const Rule> rules)
+        : rules(rules)
+    {
+        // Assumes the contents of rules is grouped by symbol
+        auto progress = rules.begin();
+        while(progress != rules.end()) {
+            auto symbol = progress->symbol;
+            auto start_idx = (uint16_t)(progress - rules.begin());
+            progress = std::ranges::find_if_not(progress + 1, rules.end(), [symbol](auto s) { return s == symbol; }, &Rule::symbol);
+            rule_spans[(uint8_t)symbol] = {start_idx, (uint16_t)(progress - rules.begin())};
+        }
+    }
+
+    constexpr
+    index_range operator[](Symbol rule_sym) const noexcept { return rule_spans[(uint8_t)rule_sym]; }
+
+    std::span<const Rule> rules;
+    index_range rule_spans[(size_t)Symbol::Symbol_Count]{};
 };
 
 struct EarleyItem {
@@ -80,7 +107,7 @@ Symbol next_symbol(const Rule& rule, const EarleyItem& item)
     return rule.components[item.progress];
 }
 
-// TODO: state_set is 32 bytes in size. Is it possible to make it smaller/cheaper to copy?
+// TODO: state_set is 24 bytes in size. Is it possible to make it smaller/cheaper to copy?
 //  Consider possible "fat" range object with small iterators that point back to it
 //  (see https://ericniebler.com/2013/11/07/input-iterators-vs-input-ranges/)
 static constexpr
@@ -92,15 +119,13 @@ bool rule_exists(const std::ranges::forward_range auto& state_set, uint16_t rule
 }
 
 static constexpr
-SpanList<EarleyItem> parse(std::span<const Rule> rules, Symbol start_symbol, std::string_view input)
+SpanList<EarleyItem> parse(const RuleSet& rule_set, Symbol start_symbol, std::string_view input)
 {
     SpanList<EarleyItem> state_sets;
     // Initialize S(0)
     state_sets.add_span();
-    for(uint16_t i = 0; i < rules.size(); ++i) {
-        if(rules[i].symbol == start_symbol) {
-            state_sets.emplace_back(i, 0);
-        }
+    for(auto rule_idx : rule_set[start_symbol]) {
+        state_sets.emplace_back(rule_idx, 0);
     }
 
     // Process input
@@ -108,11 +133,11 @@ SpanList<EarleyItem> parse(std::span<const Rule> rules, Symbol start_symbol, std
     for(uint32_t curr_pos = 0; curr_pos <= input.size() && !state_sets[curr_pos].empty(); ++curr_pos) {
         auto state_set = state_sets.span_at(curr_pos);
         for(const auto& item : state_set) {
-            const auto& item_rule = rules[item.rule_idx];
+            const auto& item_rule = rule_set.rules[item.rule_idx];
             if(is_completed(item_rule, item)) {
                 // Completion
                 for(const auto& start_item : state_sets.span_at(item.start_pos)) {
-                    const auto& start_rule = rules[start_item.rule_idx];
+                    const auto& start_rule = rule_set.rules[start_item.rule_idx];
                     if(!is_completed(start_rule, start_item) && next_symbol(start_rule, start_item) == item_rule.symbol) {
                         state_sets.emplace_back(start_item.rule_idx, start_item.start_pos, start_item.progress + 1);
                     }
@@ -126,8 +151,8 @@ SpanList<EarleyItem> parse(std::span<const Rule> rules, Symbol start_symbol, std
                     }
                 } else {
                     // Prediction
-                    for(uint16_t rule_idx = 0; rule_idx < rules.size(); ++rule_idx) {
-                        if(rules[rule_idx].symbol == next_sym && !rule_exists(state_set, rule_idx, curr_pos)) {
+                    for(auto rule_idx : rule_set[next_sym]) {
+                        if(!rule_exists(state_set, rule_idx, curr_pos)) {
                             state_sets.emplace_back(rule_idx, curr_pos);
                         }
                     }
@@ -300,10 +325,11 @@ int main(int argc, char** argv)
         { Number,  { Digit, Number } }
     };
     constexpr auto start_symbol = Sum;
+    RuleSet rule_set{rules};
 
     std::string_view input = argv[1];
     auto start_time = std::chrono::steady_clock::now();
-    auto state_sets = parse(rules, start_symbol, input);
+    auto state_sets = parse(rule_set, start_symbol, input);
     print_elapsed_time(start_time, "Recognizer time");
 
     std::cerr << "\nState sets after parsing terminates:\n";
@@ -363,6 +389,8 @@ std::ostream& operator<<(std::ostream& out, Symbol s)
             break;
         case Factor:
             out << "Factor";
+            break;
+        case Symbol_Count:
             break;
     }
     return out;
