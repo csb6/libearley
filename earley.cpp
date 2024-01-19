@@ -261,6 +261,7 @@ void print_parse_tree(std::ostream& out, std::span<const Rule> rules, const Span
             auto curr_item = find_completed_item(rules, curr_state_set->begin(), curr_state_set->end(), *comp_sym);
             assert(curr_item != curr_state_set->end());
             indent(out, indent_level); print_item(out, rules, *curr_item) << "\n";
+            print_parse_tree(out, rules, state_sets, rules[curr_item->rule_idx], curr_state_set, indent_level + 1);
             {
                 auto alt_item = find_completed_item(rules, curr_item + 1, curr_state_set->end(), *comp_sym);
                 while(alt_item != curr_state_set->end()) {
@@ -268,7 +269,6 @@ void print_parse_tree(std::ostream& out, std::span<const Rule> rules, const Span
                     alt_item = find_completed_item(rules, alt_item + 1, curr_state_set->end(), *comp_sym);
                 }
             }
-            print_parse_tree(out, rules, state_sets, rules[curr_item->rule_idx], curr_state_set, indent_level + 1);
             advance_from_nonterminal(state_sets, curr_state_set, curr_item);
         }
     }
