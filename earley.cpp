@@ -74,8 +74,8 @@ std::ostream& operator<<(std::ostream&, Symbol);
 static
 std::ostream& print_item(std::ostream&, std::span<const Rule>, const EarleyItem&);
 
-static
-std::ostream& print_state_set(std::ostream&, std::span<const Rule>, std::span<const EarleyItem>);
+//static
+//std::ostream& print_state_set(std::ostream&, std::span<const Rule>, std::span<const EarleyItem>);
 
 static constexpr
 bool is_terminal(Symbol s) { return (uint8_t)s <= (uint8_t)Symbol::Last_Terminal; }
@@ -256,14 +256,14 @@ void print_elapsed_time(auto start_time, const char* label)
     std::cerr << label << ": " << duration.count() << "ms\n";
 }
 
-static
-std::ostream& indent(std::ostream& out, uint16_t indent_level)
-{
-    for(uint16_t i = 0; i < indent_level; ++i) {
-        out << "  ";
-    }
-    return out;
-}
+//static
+//std::ostream& indent(std::ostream& out, uint16_t indent_level)
+//{
+//    for(uint16_t i = 0; i < indent_level; ++i) {
+//        out << "  ";
+//    }
+//    return out;
+//}
 
 // TODO: how to do left vs. right associativity (currently we are essentially forcing right associativity
 //  since we can only traverse the parse tree depth-first starting at the right)
@@ -279,17 +279,17 @@ void print_parse_tree(std::ostream& out, std::span<const Rule> rules, const Span
             for them since we already know the parent item, our position in it, the terminal symbol at that position,
             and how to get to the next relevant state set.
             */
-            indent(out, indent_level) << *comp_sym << "\n";
+            //indent(out, indent_level) << *comp_sym << "\n";
             advance_from_terminal(curr_state_set);
         } else {
             auto curr_item = find_completed_item(rules, curr_state_set->begin(), curr_state_set->end(), *comp_sym);
             assert(curr_item != curr_state_set->end());
-            indent(out, indent_level); print_item(out, rules, *curr_item) << "\n";
+            //indent(out, indent_level); print_item(out, rules, *curr_item) << "\n";
             print_parse_tree(out, rules, state_sets, rules[curr_item->rule_idx], curr_state_set, indent_level + 1);
             {
                 auto alt_item = find_completed_item(rules, curr_item + 1, curr_state_set->end(), *comp_sym);
                 while(alt_item != curr_state_set->end()) {
-                    indent(out, indent_level) << "Alternative: "; print_item(out, rules, *alt_item) << "\n";
+                    //indent(out, indent_level) << "Alternative: "; print_item(out, rules, *alt_item) << "\n";
                     alt_item = find_completed_item(rules, alt_item + 1, curr_state_set->end(), *comp_sym);
                 }
             }
@@ -342,12 +342,12 @@ int main(int argc, char** argv)
     auto state_sets = parse(rule_set, start_symbol, input);
     print_elapsed_time(start_time, "Recognizer time");
 
-    std::cerr << "\nState sets after parsing terminates:\n";
-    uint32_t state_set_num = 0;
-    for(const auto& state_set : state_sets) {
-        std::cerr << "S(" << state_set_num++ << "):\n";
-        print_state_set(std::cerr, rules, state_set) << "\n";
-    }
+    //std::cerr << "\nState sets after parsing terminates:\n";
+    //uint32_t state_set_num = 0;
+    //for(const auto& state_set : state_sets) {
+    //    std::cerr << "S(" << state_set_num++ << "):\n";
+    //    print_state_set(std::cerr, rules, state_set) << "\n";
+    //}
 
     auto full_parse = find_full_parse(rules, start_symbol, state_sets, input);
     if(!full_parse) {
@@ -427,13 +427,13 @@ std::ostream& print_item(std::ostream& out, std::span<const Rule> rules, const E
     return out;
 }
 
-static
-std::ostream& print_state_set(std::ostream& out, std::span<const Rule> rules, std::span<const EarleyItem> state_set)
-{
-    out << "{\n";
-    for(const auto& item : state_set) {
-        out << "  ";
-        print_item(out, rules, item) << "\n";
-    }
-    return out << "}";
-}
+//static
+//std::ostream& print_state_set(std::ostream& out, std::span<const Rule> rules, std::span<const EarleyItem> state_set)
+//{
+//    out << "{\n";
+//    for(const auto& item : state_set) {
+//        out << "  ";
+//        print_item(out, rules, item) << "\n";
+//    }
+//    return out << "}";
+//}
