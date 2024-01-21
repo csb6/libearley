@@ -1,8 +1,11 @@
 #include <iostream>
+#include <fstream>
+#include <iterator>
 #include <cassert>
 #include <span>
 #include <string_view>
 #include <vector>
+#include <string>
 #include <cstdint>
 #include <algorithm>
 #include <cctype>
@@ -299,12 +302,12 @@ void print_parse_tree(std::ostream& out, std::span<const Rule> rules, const Span
 int main(int argc, char** argv)
 {
     if(argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " input\n";
+        std::cerr << "Usage: " << argv[0] << " inputFile\n";
         return 1;
     }
 
     using enum Symbol;
-    const Rule rules[] = {
+    static const Rule rules[] = {
     // Sum     -> Sum     [+ -] Product
         { Sum,     { Sum, Plus, Product } },
         { Sum,     { Sum, Minus, Product } },
@@ -327,7 +330,14 @@ int main(int argc, char** argv)
     constexpr auto start_symbol = Sum;
     RuleSet rule_set{rules};
 
-    std::string_view input = argv[1];
+    std::ifstream input_file{argv[1]};
+    if(!input_file) {
+        std::cerr << "Error: failed to open input file: '" << argv[1] << "'\n";
+        return 1;
+    }
+    std::string input{std::istream_iterator<char>{input_file}, std::istream_iterator<char>{}};
+    std::cerr << "Input length: " << input.size() << " bytes\n";
+
     auto start_time = std::chrono::steady_clock::now();
     auto state_sets = parse(rule_set, start_symbol, input);
     print_elapsed_time(start_time, "Recognizer time");
@@ -347,8 +357,11 @@ int main(int argc, char** argv)
     const auto& full_parse_rule = rules[full_parse.item->rule_idx];
     std::cerr << "Full parse: "; print_item(std::cerr, rules, *full_parse.item) << "\n";
 
-    std::cerr << "\nParse tree:\n";
+    std::cerr << "\nTraverse parse tree:\n";
+    start_time = std::chrono::steady_clock::now();
     print_parse_tree(std::cerr, rules, state_sets, full_parse_rule, full_parse.state_set);
+    print_elapsed_time(start_time, "Parse traversal time");
+
     return 0;
 }
 
