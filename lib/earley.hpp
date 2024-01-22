@@ -13,12 +13,12 @@ namespace earley {
 
 template<typename Symbol>
     requires requires {
-        { static_cast<size_t>(Symbol::Symbol_Count) };
+        { static_cast<uint8_t>(Symbol::Symbol_Count) };
     }
 constexpr
-size_t get_symbol_count()
+uint8_t get_symbol_count()
 {
-    return static_cast<size_t>(Symbol::Symbol_Count);
+    return static_cast<uint8_t>(Symbol::Symbol_Count);
 }
 
 template<typename Symbol>
@@ -30,6 +30,7 @@ struct Rule {
 template<typename Symbol>
 struct RuleSet {
     using index_range = std::ranges::iota_view<uint16_t, uint16_t>;
+    static constexpr auto symbol_count = get_symbol_count<Symbol>();
 
     explicit constexpr
     RuleSet(std::span<const Rule<Symbol>> rules)
@@ -43,19 +44,40 @@ struct RuleSet {
             progress = std::ranges::find_if_not(progress + 1, rules.end(), [symbol](auto s) { return s == symbol; }, &Rule<Symbol>::symbol);
             rule_spans[(uint8_t)symbol] = {start_idx, (uint16_t)(progress - rules.begin())};
         }
+
+        // Find all nullable rules
+        bool at_fixpoint;
+        do {
+            at_fixpoint = true;
+            for(const auto& rule : rules) {
+                if(!is_nullable(rule.symbol)) {
+                    if(std::ranges::all_of(rule.components, [this](Symbol s) { return is_nullable(s); })) {
+                        nullable[(uint8_t)rule.symbol] = true;
+                        at_fixpoint = false;
+                    }
+                }
+            }
+        } while(!at_fixpoint);
     }
 
     constexpr
     index_range operator[](Symbol rule_sym) const noexcept { return rule_spans[(uint8_t)rule_sym]; }
 
+    constexpr
+    bool is_nullable(Symbol rule_sym) const noexcept { return nullable[(uint8_t)rule_sym]; }
+
     std::span<const Rule<Symbol>> rules;
-    index_range rule_spans[get_symbol_count<Symbol>()]{};
+    index_range rule_spans[symbol_count]{};
+    bool nullable[symbol_count]{};
 };
 
 struct EarleyItem {
     explicit constexpr
     EarleyItem(uint16_t rule_idx, uint32_t start_pos, uint16_t progress = 0)
         : rule_idx(rule_idx), progress(progress), start_pos(start_pos) {}
+
+    constexpr
+    bool operator==(const EarleyItem&) const noexcept = default;
 
     uint16_t rule_idx;  /* Index of the rule that is being matched */
     uint16_t progress;  /* Dividing point between this item's matched/unmatched components */
@@ -81,20 +103,18 @@ Symbol next_symbol(const Rule<Symbol>& rule, const EarleyItem& item)
 }
 
 constexpr
-bool rule_exists(const std::ranges::forward_range auto& state_set, uint16_t rule_idx, uint32_t curr_pos)
+bool item_exists(const std::ranges::forward_range auto& state_set, const EarleyItem& item)
 {
-    return std::ranges::any_of(state_set, [rule_idx, curr_pos](const auto& item) {
-        return item.rule_idx == rule_idx && item.start_pos == curr_pos;
-    });
+    return std::ranges::find(state_set, item) != state_set.end();
 }
 
 template<typename Token, std::regular Symbol, std::ranges::input_range InputRange>
     requires
-           std::convertible_to<std::ranges::range_value_t<InputRange>, Token>
-        && requires(Symbol s, Token t) {
+        std::convertible_to<std::ranges::range_value_t<InputRange>, Token>
+     && requires(Symbol s, Token t) {
             { is_terminal(s) } -> std::same_as<bool>;
             { matches_terminal(s, t) } -> std::same_as<bool>;
-    }
+        }
 constexpr
 SpanList<EarleyItem> parse(const RuleSet<Symbol>& rule_set, Symbol start_symbol, InputRange&& input)
 {
@@ -118,22 +138,33 @@ SpanList<EarleyItem> parse(const RuleSet<Symbol>& rule_set, Symbol start_symbol,
                 for(const auto& start_item : state_sets.span_at(item.start_pos)) {
                     const auto& start_rule = rule_set.rules[start_item.rule_idx];
                     if(!is_completed(start_item, start_rule.components.size())
-                        && next_symbol(start_rule, start_item) == item_rule.symbol) {
+                        && next_symbol(start_rule, start_item) == item_rule.symbol
+                        && !item_exists(state_set, start_item)) {
                         state_sets.emplace_back(start_item.rule_idx, start_item.start_pos, start_item.progress + 1);
                     }
                 }
             } else {
                 auto next_sym = next_symbol(item_rule, item);
-                if(is_terminal(next_sym) && curr_token != end_token) { // TODO: how can we get rid of this check (only necessary for final state)
+                if(is_terminal(next_sym) && curr_token != end_token) {
                     // Scan
                     if(matches_terminal(next_sym, *curr_token)) {
                         next_state_set.emplace_back(item.rule_idx, item.start_pos, item.progress + 1);
                     }
                 } else {
                     // Prediction
+                    EarleyItem predicted_item{0, curr_pos};
                     for(auto rule_idx : rule_set[next_sym]) {
-                        if(!rule_exists(state_set, rule_idx, curr_pos)) {
-                            state_sets.emplace_back(rule_idx, curr_pos);
+                        predicted_item.rule_idx = rule_idx;
+                        if(!item_exists(state_set, predicted_item)) {
+                            state_sets.emplace_back(predicted_item);
+                        }
+                    }
+                    // Advance item if it is incomplete and the next symbol is nullable
+                    if(rule_set.is_nullable(next_sym)) {
+                        predicted_item = item;
+                        ++predicted_item.progress;
+                        if(!item_exists(state_set, predicted_item)) {
+                            state_sets.emplace_back(std::move(predicted_item));
                         }
                     }
                 }

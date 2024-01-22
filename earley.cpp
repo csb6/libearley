@@ -141,12 +141,12 @@ int main(int argc, char** argv)
     auto state_sets = parse<char>(rule_set, start_symbol, input);
     print_elapsed_time(start_time, "Recognizer time");
 
-    // std::cerr << "\nState sets after parsing terminates:\n";
-    // uint32_t state_set_num = 0;
-    // for(const auto& state_set : state_sets) {
-    //     std::cerr << "S(" << state_set_num++ << "):\n";
-    //     print_state_set(std::cerr, rules, state_set) << "\n";
-    // }
+    //std::cerr << "\nState sets after parsing terminates:\n";
+    //uint32_t state_set_num = 0;
+    //for(const auto& state_set : state_sets) {
+    //    std::cerr << "S(" << state_set_num++ << "):\n";
+    //    print_state_set(std::cerr, rules_view, state_set) << "\n";
+    //}
 
     auto full_parse = earley::find_full_parse(rules_view, start_symbol, state_sets, input);
     if(!full_parse) {

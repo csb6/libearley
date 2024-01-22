@@ -4,8 +4,8 @@ project(earley LANGUAGES CXX)
 
 find_package(Boost REQUIRED)
 
-add_library(libearley INTERFACE earley.hpp earley_print.hpp)
-target_link_libraries(libearley INTERFACE Boost::boost)
+add_subdirectory(lib)
+add_subdirectory(test)
 
 add_executable(earley earley.cpp)
 target_link_libraries(earley PUBLIC libearley)
