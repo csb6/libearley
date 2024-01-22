@@ -11,66 +11,78 @@
 
 namespace earley {
 
-template<typename Symbol>
+/* Default implementation of symbol_traits for enum class types containing
+   a Symbol_Count enum member */
+template<std::regular Symbol>
     requires requires {
         { static_cast<uint8_t>(Symbol::Symbol_Count) };
     }
-constexpr
-uint8_t get_symbol_count()
-{
-    return static_cast<uint8_t>(Symbol::Symbol_Count);
-}
+struct symbol_traits {
+    static constexpr auto symbol_count = static_cast<uint8_t>(Symbol::Symbol_Count);
 
+    static constexpr
+    uint8_t to_index(Symbol s) noexcept { return static_cast<uint8_t>(s); }
+};
+
+/* Represents a grammar rule where symbol is the left-hand side
+   and components is the right-hand side of the rule. */
 template<typename Symbol>
 struct Rule {
     Symbol symbol;
     std::vector<Symbol> components;
 };
 
+/* Represents a grammar and associated data structures. All interactions
+   with the grammar should take place through this object. */
 template<typename Symbol>
 struct RuleSet {
     using index_range = std::ranges::iota_view<uint16_t, uint16_t>;
-    static constexpr auto symbol_count = get_symbol_count<Symbol>();
+    using SymbolTraits = symbol_traits<Symbol>;
+    static constexpr auto symbol_count = SymbolTraits::symbol_count;
 
     explicit constexpr
     RuleSet(std::span<const Rule<Symbol>> rules)
         : rules(rules)
     {
-        // Assumes the contents of rules is grouped by symbol
+        // Assumes rules are grouped by symbol
         auto progress = rules.begin();
         while(progress != rules.end()) {
             auto symbol = progress->symbol;
             auto start_idx = (uint16_t)(progress - rules.begin());
             progress = std::ranges::find_if_not(progress + 1, rules.end(), [symbol](auto s) { return s == symbol; }, &Rule<Symbol>::symbol);
-            rule_spans[(uint8_t)symbol] = {start_idx, (uint16_t)(progress - rules.begin())};
+            rule_spans[SymbolTraits::to_index(symbol)] = {start_idx, (uint16_t)(progress - rules.begin())};
         }
 
-        // Find all nullable rules
+        // Mark all nullable rules
         bool at_fixpoint;
         do {
             at_fixpoint = true;
             for(const auto& rule : rules) {
-                if(!is_nullable(rule.symbol)) {
-                    if(std::ranges::all_of(rule.components, [this](Symbol s) { return is_nullable(s); })) {
-                        nullable[(uint8_t)rule.symbol] = true;
-                        at_fixpoint = false;
-                    }
+                if(!is_nullable(rule.symbol)
+                 && std::ranges::all_of(rule.components, [this](Symbol s) { return is_nullable(s); })) {
+                    nullable[SymbolTraits::to_index(rule.symbol)] = true;
+                    at_fixpoint = false;
                 }
             }
         } while(!at_fixpoint);
     }
 
+    /* Returns a range of indices [A, B) such that A is the index of the first rule in rules with rule_sym as
+       its symbol and B is the index of the rule one past F, where F is the final rule in the grammar with
+       rule_sym as its symbol. */
     constexpr
-    index_range operator[](Symbol rule_sym) const noexcept { return rule_spans[(uint8_t)rule_sym]; }
+    index_range operator[](Symbol rule_sym) const noexcept { return rule_spans[SymbolTraits::to_index(rule_sym)]; }
 
     constexpr
-    bool is_nullable(Symbol rule_sym) const noexcept { return nullable[(uint8_t)rule_sym]; }
+    bool is_nullable(Symbol rule_sym) const noexcept { return nullable[SymbolTraits::to_index(rule_sym)]; }
 
-    std::span<const Rule<Symbol>> rules;
-    index_range rule_spans[symbol_count]{};
-    bool nullable[symbol_count]{};
+    std::span<const Rule<Symbol>> rules; /* The rules of the grammar */
+    index_range rule_spans[SymbolTraits::symbol_count]{};
+    bool nullable[SymbolTraits::symbol_count]{};
 };
 
+/* Represents a match (partial or complete) of a particular rule starting at a particular
+   position in the input. */
 struct EarleyItem {
     explicit constexpr
     EarleyItem(uint16_t rule_idx, uint32_t start_pos, uint16_t progress = 0)
@@ -88,26 +100,32 @@ using StateSetIterator = SpanList<EarleyItem>::const_iterator;
 
 using EarleyItemIterator = std::span<const EarleyItem>::iterator;
 
-/* Returns true if the item is complete. */
+/* Returns true if the item is complete. Note that rule_comp_count
+   is assumed to equal rule.components.size(), where rule is the
+   Rule corresponding to item.rule_idx. */
 constexpr
-bool is_completed(const EarleyItem& item, uint16_t rule_comp_count)
+bool is_completed(EarleyItem item, uint16_t rule_comp_count)
 {
     return item.progress == rule_comp_count;
 }
 
+/* Look ahead at the next unmatched component of a rule */
 template<typename Symbol>
 constexpr
-Symbol next_symbol(const Rule<Symbol>& rule, const EarleyItem& item)
+Symbol next_symbol(const Rule<Symbol>& rule, EarleyItem item)
 {
     return rule.components[item.progress];
 }
 
+/* Returns true if the given item already exists in the given state set */
 constexpr
-bool item_exists(const std::ranges::forward_range auto& state_set, const EarleyItem& item)
+bool item_exists(const std::ranges::forward_range auto& state_set, EarleyItem item)
 {
     return std::ranges::find(state_set, item) != state_set.end();
 }
 
+/* The Earley recognizer. The output is a list of state sets, each of which contains
+   zero or more Earley items. */
 template<typename Token, std::regular Symbol, std::ranges::input_range InputRange>
     requires
         std::convertible_to<std::ranges::range_value_t<InputRange>, Token>
@@ -129,7 +147,7 @@ SpanList<EarleyItem> parse(const RuleSet<Symbol>& rule_set, Symbol start_symbol,
     std::vector<EarleyItem> next_state_set;
     auto curr_token = std::ranges::begin(input);
     auto end_token = std::ranges::end(input);
-    for(uint32_t curr_pos = 0; !state_sets[curr_pos].empty(); ++curr_pos) {
+    for(uint32_t curr_pos = 0; !state_sets[curr_pos].empty(); ++curr_pos, ++curr_token) {
         auto state_set = state_sets.span_at(curr_pos);
         for(const auto& item : state_set) {
             const auto& item_rule = rule_set.rules[item.rule_idx];
@@ -173,7 +191,6 @@ SpanList<EarleyItem> parse(const RuleSet<Symbol>& rule_set, Symbol start_symbol,
         state_sets.add_span();
         state_sets.insert(next_state_set.begin(), next_state_set.end());
         next_state_set.clear();
-        ++curr_token;
     }
     return state_sets;
 }
@@ -192,17 +209,12 @@ struct ParseResult {
     operator bool() const noexcept { return item != EarleyItemIterator{}; }
 };
 
+/* Finds an Earley item (and its containing state set) that has the given symbol and
+   matches the full input. If no such Earley item exists, it returns a result that
+   evaluates to false. */
 template<typename Symbol>
 constexpr
-bool is_full_parse(std::span<const Rule<Symbol>> rules, Symbol start_symbol, const EarleyItem& item)
-{
-    const auto& rule = rules[item.rule_idx];
-    return is_completed(item, rule.components.size()) && item.start_pos == 0 && rule.symbol == start_symbol;
-}
-
-template<typename Symbol>
-constexpr
-ParseResult find_full_parse(std::span<const Rule<Symbol>> rules, Symbol start_symbol,
+ParseResult find_full_parse(std::span<const Rule<Symbol>> rules, Symbol symbol,
                             const SpanList<EarleyItem>& state_sets, std::ranges::input_range auto&& input)
 {
     if(state_sets.size() < input.size()) {
@@ -210,8 +222,11 @@ ParseResult find_full_parse(std::span<const Rule<Symbol>> rules, Symbol start_sy
     }
 
     auto state_set = state_sets.begin() + input.size();
-    auto full_parse = std::ranges::find_if(*state_set, [&rules, start_symbol](const auto& item) {
-        return is_full_parse(rules, start_symbol, item);
+    auto full_parse = std::ranges::find_if(*state_set, [&rules, symbol](const auto& item) {
+        const auto& rule = rules[item.rule_idx];
+        return is_completed(item, rule.components.size())
+            && item.start_pos == 0
+            && rule.symbol == symbol;
     });
     if(full_parse == state_set->end()) {
         return {};
@@ -219,7 +234,8 @@ ParseResult find_full_parse(std::span<const Rule<Symbol>> rules, Symbol start_sy
     return {state_set, full_parse};
 }
 
-/* Find a completed Earley item with the given symbol as its head in the provided range of Earley items */
+/* Find a completed Earley item with the given symbol as its left-hand side in the provided range of
+   Earley items */
 template<typename Symbol>
 constexpr
 EarleyItemIterator find_completed_item(std::span<const Rule<Symbol>> rules,

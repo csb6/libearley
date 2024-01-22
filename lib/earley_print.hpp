@@ -6,7 +6,7 @@
 namespace earley {
 
 template<typename Symbol>
-std::ostream& print_item(std::ostream& out, std::span<const Rule<Symbol>> rules, const earley::EarleyItem& item)
+std::ostream& print_item(std::ostream& out, std::span<const Rule<Symbol>> rules, EarleyItem item)
 {
     auto& rule = rules[item.rule_idx];
     out << rule.symbol << " -> ";
