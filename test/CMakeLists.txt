@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 
-add_executable(test_empty test_empty.cpp)
-target_link_libraries(test_empty PUBLIC libearley)
+add_executable(test_nullable test_nullable.cpp)
+target_link_libraries(test_nullable PUBLIC libearley)
+
+add_executable(test_input_file test_input_file.cpp)
+target_link_libraries(test_input_file PUBLIC libearley)

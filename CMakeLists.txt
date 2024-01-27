@@ -6,6 +6,3 @@ find_package(Boost REQUIRED)
 
 add_subdirectory(lib)
 add_subdirectory(test)
-
-add_executable(earley earley.cpp)
-target_link_libraries(earley PUBLIC libearley)
