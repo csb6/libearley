@@ -18,7 +18,7 @@ A C++ [Earley parser](https://en.wikipedia.org/wiki/Earley_parser) library.
 ### Dependencies
 
 - A compiler that supports C++20
-- Boost (tested with 1.82, but should works with any version that supports C++20 and includes
+- Boost (tested with 1.82, but should work with any version that supports C++20 and includes
   the [Boost.STLInterfaces](https://www.boost.org/doc/libs/1_84_0/doc/html/stl_interfaces.html) library)
 
 ### Building
@@ -42,8 +42,8 @@ In order to build a parser, the library requires the user to provide the followi
     - Typically, an enum class type should be used.
         - **Note:** For enum class types, you must provide a special enum member named `Symbol_Count`. This
           will be used in the parser to determine the number of possible symbols.
-        - For types that are not enum classes, a custom specialization of `earley::symbol_traits` must be
-          provided for your symbol type.
+        - For symbol types that are not enum classes, a custom specialization of `earley::symbol_traits` must be
+          provided.
     - A pair of helper functions with the signatures `bool is_terminal(Symbol)` and
       `bool matches_terminal(Symbol, Token)` must also be provided. These are used to check if a symbol is a terminal
       and if a given terminal symbol matches a given token, respectively.
@@ -52,16 +52,16 @@ In order to build a parser, the library requires the user to provide the followi
     - The grammar rules must get wrapped in an `earley::RuleSet<Symbol>` object. This is what is passed to the parser.
     - Each rule consists of a "left-hand side", which is a non-terminal symbol, and a "right-hand side", which
       is a sequence of zero or more terminal and/or non-terminal symbols.
-    - The parser assumes that all rules with the same left-hand side are adjacent to each other in the grammar.
+    - The parser assumes that all rules with the same left-hand side are located adjacently to each other in the grammar.
 - A **start symbol**: The goal of parsing is to the match the input to a rule that has this symbol as its left-hand
   side.
 
 To parse input, call the function `earley::parse` and pass the above information as parameters. This function
-will return a sequence of *state sets*, each of which holds the Earley items matched against the
-input at each position. In other words, `state_sets[0]` represents the items considered at the
+will return a sequence of *state sets*, each of which holds the Earley items considered against the
+input at each position. For example, `state_sets[0]` represents the items considered at the
 first element of the input, `state_sets[1]` at the second element, and so on.
 
-Here is an example program that parses the given input and prints the rule that matched the full input (if any).
+Here is an example program that parses some input and prints the rule that matched the full input (if any).
 This code can also be found in `test/example.cpp`.
 
 ```cpp
@@ -205,6 +205,8 @@ The output should be:
 ```
 Full parse: Sum -> Sum '+' Product . (0)
 ```
+
+This means that the entire input was matched with the grammar rule `Sum -> Sum '+' Product`. 
 
 ## License
 
