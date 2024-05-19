@@ -44,7 +44,7 @@ int main()
     earley::RuleSet<Symbol> rule_set{rules_view};
 
     std::string_view input = "";
-    auto state_sets = earley::parse<char>(rule_set, start_symbol, input);
+    auto state_sets = earley::parse<char>(rule_set, start_symbol, 100, input);
 
     // Expected:
     //  A -> . (0)

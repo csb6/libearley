@@ -138,7 +138,7 @@ int main(int argc, char** argv)
     std::cerr << "Input length: " << input.size() << " bytes\n";
 
     auto start_time = std::chrono::steady_clock::now();
-    auto state_sets = parse<char>(rule_set, start_symbol, input);
+    auto state_sets = parse<char>(rule_set, start_symbol, 1'000'000, input);
     print_elapsed_time(start_time, "Recognizer time");
 
     //std::cerr << "\nState sets after parsing terminates:\n";

@@ -150,10 +150,9 @@ template<typename Token, std::regular Symbol, std::ranges::input_range InputRang
             { is_terminal(s) } -> std::same_as<bool>;
             { matches_terminal(s, t) } -> std::same_as<bool>;
         }
-constexpr
-SpanList<EarleyItem> parse(const RuleSet<Symbol>& rule_set, Symbol start_symbol, InputRange&& input)
+SpanList<EarleyItem> parse(const RuleSet<Symbol>& rule_set, Symbol start_symbol, size_t max_item_capacity, InputRange&& input)
 {
-    SpanList<EarleyItem> state_sets;
+    SpanList<EarleyItem> state_sets{max_item_capacity};
     // Initialize S(0)
     state_sets.add_span();
     for(auto rule_idx : rule_set[start_symbol]) {
@@ -165,12 +164,12 @@ SpanList<EarleyItem> parse(const RuleSet<Symbol>& rule_set, Symbol start_symbol,
     auto curr_token = std::ranges::begin(input);
     auto end_token = std::ranges::end(input);
     for(uint32_t curr_pos = 0; !state_sets[curr_pos].empty(); ++curr_pos, ++curr_token) {
-        auto state_set = state_sets.span_at(curr_pos);
-        for(const auto& item : state_set) {
+        auto state_set = state_sets.curr_span();
+        for(auto item : state_set) {
             const auto& item_rule = rule_set.rules[item.rule_idx];
             if(is_completed(item, item_rule.components.size())) {
                 // Completion
-                for(const auto& start_item : state_sets.span_at(item.start_pos)) {
+                for(auto start_item : state_sets[item.start_pos]) {
                     const auto& start_rule = rule_set.rules[start_item.rule_idx];
                     if(!is_completed(start_item, start_rule.components.size())
                         && next_symbol(start_rule, start_item) == item_rule.symbol
@@ -206,7 +205,7 @@ SpanList<EarleyItem> parse(const RuleSet<Symbol>& rule_set, Symbol start_symbol,
             }
         }
         state_sets.add_span();
-        state_sets.insert(next_state_set.begin(), next_state_set.end());
+        state_sets.append(next_state_set.begin(), next_state_set.end());
         next_state_set.clear();
     }
     return state_sets;

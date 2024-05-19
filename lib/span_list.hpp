@@ -23,16 +23,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <cstdint>
 #include <ranges>
 #include <boost/stl_interfaces/iterator_interface.hpp>
+#include "big_array.hpp"
 
 /* Iterator for moving between spans within a SpanList<T> structure */
 template<typename T>
 struct SpanListIterator : public boost::stl_interfaces::proxy_iterator_interface<SpanListIterator<T>,
                                     std::random_access_iterator_tag,
                                     std::span<const T>> {
-    using Base = boost::stl_interfaces::proxy_iterator_interface<SpanListIterator<T>,
-                    std::random_access_iterator_tag,
-                    std::span<const T>>;
-
     constexpr
     SpanListIterator() = default;
     constexpr
@@ -60,20 +57,20 @@ private:
 };
 
 /* Sentinel representing end of a span of items */
+template<typename T>
 struct SpanEnd {
     constexpr
     SpanEnd() = default;
     constexpr
-    SpanEnd(const uint32_t* end_idx)
-        : end_idx(end_idx) {}
+    SpanEnd(const BigArray<T>* end)
+        : end(end) {}
 
-    constexpr
-    bool operator==(uint32_t idx) const noexcept
+    bool operator==(const T* pos) const noexcept
     {
-        return idx >= *end_idx;
+        return pos >= end->end();
     }
 private:
-    const uint32_t* end_idx = nullptr;
+    const BigArray<T>* end = nullptr;
 };
 
 /* Represents a growable array (divided into subspans) of items of type T. Items can only be added to
@@ -82,6 +79,10 @@ template<typename T>
 class SpanList {
 public:
     using const_iterator = SpanListIterator<T>;
+
+    explicit
+    SpanList(size_t item_capacity)
+        : items(item_capacity) {}
 
     constexpr
     void add_span()
@@ -97,10 +98,10 @@ public:
 
     template<typename Iterator>
     constexpr
-    void insert(Iterator begin, Iterator end)
+    void append(Iterator begin, Iterator end)
     {
         start_points.back() += end - begin;
-        items.insert(items.end(), begin, end);
+        items.append(begin, end);
     }
 
     template<typename ...Args>
@@ -117,15 +118,15 @@ public:
     {
         return {items.begin() + start_points[index], items.begin() + start_points[index+1]};
     }
-    /* Same as operator[], but iterators remain valid when items are added to the SpanList
+    /* Iterators remain valid when items are added to the SpanList
        Note: adding new spans invalidates the ranges returned by this function. */
-    constexpr
-    auto span_at(uint32_t index) const noexcept
+    std::ranges::subrange<T*, SpanEnd<T>> curr_span() noexcept
     {
-        return std::views::iota(start_points[index], SpanEnd{&start_points[index+1]})
-             | std::views::transform([this](uint32_t idx){ return items[idx]; });
+        return {items.begin() + *(start_points.end() - 2), SpanEnd{&items}};
     }
 
+    constexpr
+    size_t num_of_items() const noexcept { return items.size(); }
     constexpr
     size_t size() const noexcept { return start_points.size(); }
     constexpr
@@ -133,6 +134,6 @@ public:
     constexpr
     const_iterator end() const noexcept { return {items, start_points.end() - 1}; }
 private:
-    std::vector<T> items;
+    BigArray<T> items;
     std::vector<uint32_t> start_points;
 };

@@ -71,7 +71,7 @@ int main()
     earley::RuleSet rule_set{rules_view};
 
     std::string_view input = "1+(8*9)";
-    auto state_sets = parse<char>(rule_set, start_symbol, input);
+    auto state_sets = parse<char>(rule_set, start_symbol, 100, input);
 
     auto full_parse = earley::find_full_parse(rules_view, start_symbol, state_sets, input);
     if(!full_parse) {
