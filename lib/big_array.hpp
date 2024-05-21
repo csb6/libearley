@@ -17,29 +17,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 #pragma once
 
-#include <cerrno>
-#include <cstring>
-#include <cassert>
 #include <type_traits>
 #include <stdexcept>
-#include <sys/mman.h>
-#include <unistd.h>
 
 namespace detail {
 
 class BigArrayBase {
 protected:
-    BigArrayBase(size_t capacity, size_t element_size)
-    {
-        m_byte_capacity = capacity * element_size;
-        m_byte_capacity += m_byte_capacity % (size_t)getpagesize();
-        void* data = mmap(nullptr, m_byte_capacity, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, 0, 0);
-        if(data == MAP_FAILED) {
-            throw std::runtime_error(strerror(errno));
-        }
-        m_data = (char*)data;
-        m_end = m_data;
-    }
+    BigArrayBase(size_t capacity, size_t element_size);
 public:
     BigArrayBase(const BigArrayBase&) = delete;
     BigArrayBase& operator=(const BigArrayBase&) = delete;
@@ -60,14 +45,7 @@ public:
         other.m_end = nullptr;
         return *this;
     }
-    ~BigArrayBase() noexcept
-    {
-        // Note: element destructors not called
-        if(m_data != nullptr) {
-            int err = munmap((void*)m_data, m_byte_capacity);
-            assert(err == 0);
-        }
-    }
+    ~BigArrayBase() noexcept;
 
     size_t byte_capacity() const { return m_byte_capacity; }
 protected:

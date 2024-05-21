@@ -10,4 +10,4 @@ add_executable(test_input_file test_input_file.cpp)
 target_link_libraries(test_input_file PUBLIC libearley)
 
 add_executable(test_big_array test_big_array.cpp)
-target_include_directories(test_big_array PUBLIC ${CMAKE_SOURCE_DIR}/lib)
+target_link_libraries(test_big_array PUBLIC big_array)
