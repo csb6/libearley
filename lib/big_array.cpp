@@ -49,4 +49,4 @@ detail::BigArrayBase::~BigArrayBase() noexcept
 
 #error "Platform not supported"
 
-#endif /* ifdef (unix or apple platform) */
+#endif /* ifdef (platform) */

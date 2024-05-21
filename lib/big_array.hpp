@@ -47,7 +47,7 @@ public:
     }
     ~BigArrayBase() noexcept;
 
-    size_t byte_capacity() const { return m_byte_capacity; }
+    size_t byte_capacity() const noexcept { return m_byte_capacity; }
 protected:
     void check_has_space(size_t element_size, size_t count = 1) const
     {
@@ -101,13 +101,13 @@ public:
         }
     }
 
-    iterator begin() noexcept { return (T*)m_data; }
-    iterator end() noexcept { return (T*)m_end; }
+    iterator       begin() noexcept       { return (T*)m_data; }
     const_iterator begin() const noexcept { return (const T*)m_data; }
-    const_iterator end() const noexcept { return (const T*)m_end; }
-    size_t size() const noexcept { return end() - begin(); }
-    T& operator[](size_t index) noexcept { return begin()[index]; }
-    const T& operator[](size_t index) const noexcept { return begin()[index]; }
-    T& back() noexcept { return *(end() - 1); }
+    iterator       end() noexcept         { return (T*)m_end; }
+    const_iterator end() const noexcept   { return (const T*)m_end; }
+    T&       back() noexcept       { return *(end() - 1); }
     const T& back() const noexcept { return *(end() - 1); }
+    T&       operator[](size_t index) noexcept       { return begin()[index]; }
+    const T& operator[](size_t index) const noexcept { return begin()[index]; }
+    size_t size() const noexcept { return end() - begin(); }
 };
